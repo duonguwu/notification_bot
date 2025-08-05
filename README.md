@@ -24,26 +24,42 @@ Notification Bot là một hệ thống chatbot API backend hoàn chỉnh, có t
 ## 🏗️ Kiến trúc hệ thống
 
 ```mermaid
-graph TB
-    A[FastAPI Server] --> B[JWT Auth]
-    A --> C[Customer API]
-    A --> D[Message API]
-    A --> E[Notification API]
-    A --> F[Task API]
-    
-    C --> G[MongoDB]
-    D --> H[Google Gemini AI]
-    D --> I[Redis Cache]
-    D --> G
-    
-    E --> J[TaskIQ Worker]
-    F --> J
-    J --> K[Chat Service]
-    J --> L[CSV Processing]
-    
-    H --> M[Langchain]
-    I --> N[Short-term Memory]
-    G --> O[Long-term Memory]
+graph LR
+    subgraph "Clients"
+        User[👨‍💻 User / Admin]
+    end
+
+    subgraph "Core System"
+        direction TB
+        API[🚀 FastAPI App]
+        TaskIQ[⚡ TaskIQ Worker]
+    end
+
+    subgraph "Data Stores"
+        direction TB
+        MongoDB[🗄️ MongoDB<br>Long-term Memory<br>Customer Data<br>Chat History]
+        Redis[💾 Redis<br>Short-term Memory<br>Task Queue]
+    end
+
+    subgraph "External Services"
+        Gemini[🤖 Google Gemini AI]
+    end
+
+    User -- "HTTPS Request" --> API
+
+    API -- "CRUD & Chat History" --> MongoDB
+    API -- "Session Data" --> Redis
+    API -- "AI Chat" --> Gemini
+    API -- "Queue Tasks" --> TaskIQ
+
+    TaskIQ -- "Process CSV & Notifications" --> MongoDB
+    TaskIQ -- "Reads Queue From" --> Redis
+
+    style API fill:#005571,stroke:#333,stroke-width:2px,color:#fff
+    style TaskIQ fill:#D83B01,stroke:#333,stroke-width:2px,color:#fff
+    style MongoDB fill:#4EA94B,stroke:#333,stroke-width:2px,color:#fff
+    style Redis fill:#DD0031,stroke:#333,stroke-width:2px,color:#fff
+    style Gemini fill:#4285F4,stroke:#333,stroke-width:2px,color:#fff
 ```
 
 ## 🛠️ Tech Stack
@@ -309,61 +325,6 @@ notification/
 └── 📚 README.md               # Documentation
 ```
 
-## 🔧 Development
-
-### Local Development
-```bash
-# Hot reload development server
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
-# Run TaskIQ worker với debug
-python worker.py
-
-# Run tests
-pytest tests/ -v
-
-# Code formatting
-black .
-isort .
-```
-
-### Environment Variables
-```env
-# App Configuration
-DEBUG=true
-APP_NAME="Chatbot API Backend"
-APP_VERSION="1.0.0"
-HOST=0.0.0.0
-PORT=8000
-
-# Security
-SECRET_KEY=your-secret-key-change-in-production
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# Database
-MONGODB_URL=mongodb://admin:password123@localhost:27017
-MONGODB_DATABASE=chatbot_db
-
-# Redis & TaskIQ
-REDIS_URL=redis://localhost:6379
-REDIS_DB=0
-TASKIQ_BROKER_URL=redis://localhost:6379/1
-TASKIQ_RESULT_BACKEND_URL=redis://localhost:6379/2
-
-# AI Configuration
-GOOGLE_API_KEY=your-google-api-key
-GEMINI_MODEL=gemini-1.5-flash
-
-# File Upload
-UPLOAD_DIR=./uploads
-MAX_FILE_SIZE=10485760  # 10MB
-
-# Memory Settings
-SHORT_TERM_MEMORY_TTL=1800  # 30 minutes
-MAX_CONVERSATION_HISTORY=50
-```
-
 ## 📊 Monitoring & Analytics
 
 ### Health Checks
@@ -399,52 +360,3 @@ curl http://localhost:8000/health/redis
 - **File Upload Security**: Type và size validation
 - **Rate Limiting**: API endpoint protection
 - **SQL Injection Prevention**: NoSQL với umongo
-
-## 🐳 Docker Deployment (Coming Soon)
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  app:
-    build: .
-    ports:
-      - "8000:8000"
-    depends_on:
-      - mongo
-      - redis
-    environment:
-      - MONGODB_URL=mongodb://admin:password123@mongo:27017
-      - REDIS_URL=redis://redis:6379
-      # ... other env vars
-
-  worker:
-    build: .
-    command: python worker.py
-    depends_on:
-      - redis
-    environment:
-      - TASKIQ_BROKER_URL=redis://redis:6379/1
-      # ... other env vars
-
-  mongo:
-    image: mongo:latest
-    # ... config
-
-  redis:
-    image: redis:7-alpine
-    # ... config
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-1. Fork the repository.
-2. Create a new feature branch (`git checkout -b feature/your-feature`).
-3. Commit your changes (`git commit -m 'Add some feature'`).
-4. Push to the branch (`git push origin feature/your-feature`).
-5. Open a Pull Request.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
