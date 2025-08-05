@@ -24,42 +24,108 @@ Notification Bot là một hệ thống chatbot API backend hoàn chỉnh, có t
 ## 🏗️ Kiến trúc hệ thống
 
 ```mermaid
-graph LR
-    subgraph "Clients"
-        User[👨‍💻 User / Admin]
-    end
-
-    subgraph "Core System"
+flowchart TD
+    %% CLIENT LAYER
+    subgraph CLIENT["🖥️ Client Layer"]
         direction TB
-        API[🚀 FastAPI App]
-        TaskIQ[⚡ TaskIQ Worker]
+        WebApp["🌐 Web App / Admin"]
+        Mobile["📱 Mobile App (User)"]
+        APIClient["🔗 External API Client"]
     end
 
-    subgraph "Data Stores"
+    %% AUTH
+    subgraph AUTH["🔒 Auth & Identity"]
+        JWT["JWT Authentication<br>Sign in / Sign up"]
+    end
+
+    %% FASTAPI LAYER
+    subgraph API["🚀 FastAPI Server (App Logic)"]
         direction TB
-        MongoDB[🗄️ MongoDB<br>Long-term Memory<br>Customer Data<br>Chat History]
-        Redis[💾 Redis<br>Short-term Memory<br>Task Queue]
+        AuthAPI["/auth/*<br>Login/Signup"]
+        CustomerAPI["/customers/*<br>CRUD Customer"]
+        NotificationAPI["/notifications/*<br>CRUD/Send Notification"]
+        MessageAPI["/messages/*<br>Send/History Message"]
+        AdminAPI["/admin/*<br>Admin Features"]
+        Docs["/docs<br>OpenAPI UI"]
+        TaskQueue["TaskIQ Producer<br>Queue Task"]
+        Langchain["Langchain Client<br>(Gemini API)"]
+        Memory["Memory Manager"]
     end
 
-    subgraph "External Services"
-        Gemini[🤖 Google Gemini AI]
+    %% TASKIQ WORKER
+    subgraph WORKER["⚡ TaskIQ Worker"]
+        TaskIQ["Send Notification Task<br>Bulk Process"]
     end
 
-    User -- "HTTPS Request" --> API
+    %% DATA LAYER
+    subgraph DATA["🗄️ Data Layer"]
+        MongoDB["MongoDB<br>- User/Customer<br>- Message/History<br>- NotificationConfig<br>- Notification Log"]
+        Redis["Redis<br>- Short-term Memory<br>- Task Queue"]
+    end
 
-    API -- "CRUD & Chat History" --> MongoDB
-    API -- "Session Data" --> Redis
-    API -- "AI Chat" --> Gemini
-    API -- "Queue Tasks" --> TaskIQ
+    %% AI
+    subgraph AI["🤖 AI Service"]
+        Gemini["Google Gemini API<br>Langchain"]
+    end
 
-    TaskIQ -- "Process CSV & Notifications" --> MongoDB
-    TaskIQ -- "Reads Queue From" --> Redis
+    %% CLIENT to API
+    WebApp -- "REST API\n(JWT)" --> AuthAPI
+    WebApp -- "REST API" --> CustomerAPI
+    WebApp -- "REST API" --> NotificationAPI
+    WebApp -- "REST API" --> MessageAPI
+    WebApp -- "Admin" --> AdminAPI
+    Mobile -- "REST API\n(JWT)" --> AuthAPI
+    Mobile -- "REST API" --> CustomerAPI
+    Mobile -- "REST API" --> NotificationAPI
+    Mobile -- "REST API" --> MessageAPI
+    APIClient -- "API Key/JWT" --> AuthAPI
 
-    style API fill:#005571,stroke:#333,stroke-width:2px,color:#fff
-    style TaskIQ fill:#D83B01,stroke:#333,stroke-width:2px,color:#fff
-    style MongoDB fill:#4EA94B,stroke:#333,stroke-width:2px,color:#fff
-    style Redis fill:#DD0031,stroke:#333,stroke-width:2px,color:#fff
-    style Gemini fill:#4285F4,stroke:#333,stroke-width:2px,color:#fff
+    %% AUTH
+    AuthAPI -- "Create/Verify JWT" --> JWT
+    AuthAPI -- "User/Customer Data" --> MongoDB
+
+    %% API logic to DATA
+    CustomerAPI -- "CRUD" --> MongoDB
+    NotificationAPI -- "CRUD NotificationConfig" --> MongoDB
+    NotificationAPI -- "Push Notification Task" --> TaskQueue
+    NotificationAPI -- "Read Noti Log" --> MongoDB
+    MessageAPI -- "Save/Read Message" --> MongoDB
+    MessageAPI -- "Short-term Memory" --> Redis
+    Memory -- "Read/Write" --> Redis
+    Memory -- "Read/Write" --> MongoDB
+
+    %% AI
+    MessageAPI -- "Call AI (Prompt, Context)" --> Langchain
+    Langchain -- "Invoke Gemini" --> Gemini
+    Langchain -- "Return AI Answer" --> MessageAPI
+
+    %% TASKIQ WORKER
+    TaskQueue -- "Redis Queue" --> TaskIQ
+    TaskIQ -- "Bulk Noti + Log" --> MongoDB
+    TaskIQ -- "Write Task Status" --> MongoDB
+    TaskIQ -- "Read Template/Customer" --> MongoDB
+
+    %% DATA ACCESS
+    NotificationAPI -- "Read Noti Config" --> MongoDB
+    NotificationAPI -- "Read/Write Noti Log" --> MongoDB
+    AdminAPI -- "All DB Access" --> MongoDB
+
+    %% History access
+    MessageAPI -- "Read Chat/Noti/AI history" --> MongoDB
+
+    %% Redis use
+    TaskIQ -- "Queue Data" --> Redis
+
+    %% STYLE
+    style CLIENT fill:#e3f2fd,stroke:#555,stroke-width:2px
+    style AUTH fill:#fbe9e7,stroke:#555,stroke-width:2px
+    style API fill:#ffe082,stroke:#333,stroke-width:2px
+    style WORKER fill:#f3e5f5,stroke:#555,stroke-width:2px
+    style DATA fill:#b2dfdb,stroke:#555,stroke-width:2px
+    style AI fill:#c5cae9,stroke:#555,stroke-width:2px
+    style MongoDB fill:#388e3c,color:#fff
+    style Redis fill:#d32f2f,color:#fff
+    style Gemini fill:#1565c0,color:#fff
 ```
 
 ## 🛠️ Tech Stack
