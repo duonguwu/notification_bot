@@ -1,0 +1,49 @@
+# FastAPI và dependencies
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Authentication
+python-jose[cryptography]
+passlib[bcrypt]
+
+# Database
+motor
+umongo
+pymongo
+marshmallow==3.21.1
+
+# Task Queue
+taskiq
+taskiq-redis
+
+# Redis
+redis
+
+# Data Processing
+pandas
+openpyxl
+
+# Email
+aiosmtplib
+fastapi-mail
+
+# AI & Langchain
+langchain
+langchain-google-genai
+google-generativeai
+
+# Template Engine
+jinja2
+
+# Utilities
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+
+# Development
+pytest
+pytest-asyncio
+black
+isort

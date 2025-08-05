@@ -1,0 +1,6 @@
+email,full_name,phone,company,position,address,city,country,language,tags
+duongnguyen@gmail.com,Duong Nguyen,0327879401,SCC,Manager,123 Nguyen Trai,Hanoi,Vietnam,vi,customer
+phamanh@gmail.com,Pham Anh,0912345678,ACME,Director,456 Tran Phu,HCM,Vietnam,en,partner
+linhvu@gmail.com,Linh Vu,0987654321,BigCorp,Staff,789 Le Loi,Danang,Vietnam,vi,
+testuser@example.com,Test User,,Test Inc.,,1 Some Street,Hanoi,Vietnam,vi,new
+
