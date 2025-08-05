@@ -1,7 +1,5 @@
 # 🤖 Notification Bot - AI Chatbot API Backend
 
-**Hệ thống chatbot thông minh với AI, quản lý khách hàng và notification system hoàn chỉnh**
-
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
 [![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
@@ -14,7 +12,7 @@ Notification Bot là một hệ thống chatbot API backend hoàn chỉnh, có t
 ### ✨ Tính năng chính
 
 - 👥 **Quản lý khách hàng** - CRUD operations + CSV import tự động
-- 📧 **Hệ thống thông báo** - Email notifications với template system
+- 📧 **Hệ thống thông báo** - Chat notifications với template system
 - ⚡ **Background Tasks** - TaskIQ cho xử lý bất đồng bộ
 - 🔐 **JWT Authentication** - Bảo mật API endpoints
 - 📊 **Task Monitoring** - Dashboard theo dõi tasks real-time
@@ -40,7 +38,7 @@ graph TB
     
     E --> J[TaskIQ Worker]
     F --> J
-    J --> K[Email Service]
+    J --> K[Chat Service]
     J --> L[CSV Processing]
     
     H --> M[Langchain]
@@ -74,10 +72,10 @@ graph TB
 - **Passlib** - Password hashing với bcrypt
 - **CORS Middleware** - Cross-origin resource sharing
 
-### Data Processing & Email
+### Data Processing & Chat
 - **Pandas** - CSV processing và data manipulation
 - **aiosmtplib** - Async SMTP client
-- **FastAPI-Mail** - Email template system
+- **FastAPI-Mail** - Chat template system
 - **Jinja2** - Template engine
 
 ## 📦 Cài đặt và Setup (Docker)
@@ -230,7 +228,7 @@ Bot được cấu hình với personality chuyên nghiệp trong `prompts/syste
 ### Template System
 - **Dynamic Variables**: `{customer_name}`, `{customer_email}`, `{company}`
 - **Jinja2 Templates**: Advanced templating với logic
-- **Multi-channel**: Email, in-app notifications
+- **Multi-channel**: Chat
 - **Batch Processing**: Gửi hàng loạt với TaskIQ
 
 ### Notification Flow
@@ -245,7 +243,7 @@ sequenceDiagram
     Admin->>API: POST /notifications/send
     API->>TaskIQ: Queue notification task
     TaskIQ->>TaskIQ: Process template
-    TaskIQ->>Customer: Send email
+    TaskIQ->>Customer: Send Chat
     TaskIQ->>AI Bot: Inject into chat context
     Customer->>AI Bot: Ask about notification
     AI Bot->>Customer: Reference notification content
@@ -260,9 +258,9 @@ sequenceDiagram
    - Progress tracking
    - Error reporting
 
-2. **Email Notification Sending** (`send_notification.py`)
+2. **Chat Notification Sending** (`send_notification.py`)
    - Template processing
-   - Batch email sending
+   - Batch Chat sending
    - Delivery tracking
    - Retry mechanism
 
@@ -298,7 +296,7 @@ notification/
 │   └── 🧠 memory_manager.py   # Redis + MongoDB memory
 ├── 📁 tasks/                   # TaskIQ background tasks
 │   ├── 📊 import_customers.py # CSV processing
-│   └── 📧 send_notification.py# Email sending
+│   └── 📧 send_notification.py# Chat sending
 ├── 📁 utils/                   # Utility functions
 │   └── ✅ validators.py       # Data validation helpers
 ├── 📁 prompts/                 # AI prompt templates
