@@ -12,6 +12,8 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: password123
+    networks:
+      - app-network
 
   redis:
     image: redis:7-alpine
@@ -22,7 +24,52 @@ services:
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes
+    networks:
+      - app-network
+
+  app:
+    build: .
+    container_name: app-container
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./notification:/app
+    env_file:
+      - ./notification/.env
+    environment:
+      - MONGODB_URL=mongodb://admin:password123@mongo:27017
+      - REDIS_URL=redis://redis:6379
+      - TASKIQ_BROKER_URL=redis://redis:6379/1
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - app-network
+
+  worker:
+    build: .
+    container_name: worker-container
+    restart: unless-stopped
+    volumes:
+      - ./notification:/app
+    env_file:
+      - ./notification/.env
+    environment:
+      - MONGODB_URL=mongodb://admin:password123@mongo:27017
+      - REDIS_URL=redis://redis:6379
+      - TASKIQ_BROKER_URL=redis://redis:6379/1
+    command: taskiq worker worker:broker --fs-discover --ack-type when_saved
+    depends_on:
+      - redis
+    networks:
+      - app-network
 
 volumes:
   mongo-data:
   redis-data:
+
+networks:
+  app-network:
+    driver: bridge

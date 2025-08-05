@@ -1,348 +1,452 @@
-# 🚀 **CHATBOT API BACKEND**
-
----
-
-## **1. TỔNG QUAN KIẾN TRÚC**
-
-```
-Client <--> FastAPI (JWT Auth, RESTful API)
-                |
-                |-- CSV Import API ----> TaskIQ (Xử lý nền với pandas) ---> MongoDB (umongo)
-                |
-                |-- Notification API --(TaskIQ email sender)--> SMTP/Email
-                |
-                |-- Message API (chatbot logic) --(Langchain/AI)--> 
-                |         |                            |            
-                |         |----> Redis (short-term memory)         
-                |         |----> MongoDB (long-term memory)        
-```
-
----
-
-## **2. CÁC CHỨC NĂNG & LUỒNG XỬ LÝ CHÍNH**
-
-### **A. Đăng nhập/Xác thực JWT**
-
-* **API**: `POST /auth/login`
-* Nhận username/password, trả về JWT Token.
-* Dùng JWT để xác thực các endpoint khác.
-
-**Công nghệ:**
-
-* FastAPI
-* `fastapi.security` (OAuth2PasswordBearer/JWT)
-* PyJWT hoặc jose
-
----
-
-### **B. Import khách hàng từ CSV (Xử lý bất đồng bộ với TaskIQ)**
-
-* **API**: `POST /customers/import`
-
-  * Nhận file CSV upload từ user.
-  * Trả về job\_id để check trạng thái xử lý.
-
-* **Luồng xử lý:**
-
-  1. File lưu tạm (hoặc buffer in-memory).
-  2. Đẩy task vào TaskIQ queue (task xử lý file nền).
-  3. TaskIQ worker dùng pandas đọc file, lọc row trùng (theo email/phone/ID).
-  4. Lưu từng khách hàng vào MongoDB (qua umongo).
-  5. Ghi log trạng thái (số dòng thành công, lỗi, v.v.)
-
-* **API**: `GET /customers/import/{job_id}/status`
-
-  * Trả về trạng thái xử lý, tổng số dòng thành công, bị lỗi, v.v.
-
-**Công nghệ:**
-
-* FastAPI (upload file)
-* TaskIQ (background processing)
-* pandas (read/clean csv)
-* MongoDB + umongo (lưu customer)
-* Redis (job status cache, tuỳ chọn)
-
----
-
-### **C. Quản lý khách hàng**
-
-* **API**: `GET /customers` (paging, filter)
-* **API**: `GET /customers/{id}`
-* **API**: `PUT /customers/{id}` (update info)
-* **API**: `DELETE /customers/{id}`
-
-**Công nghệ:**
-
-* FastAPI
-* MongoDB + umongo
-
----
-
-### **D. Cấu hình và gửi thông báo (Notification) cho khách hàng**
-
-#### **1. Tạo cấu hình thông báo**
-
-* **API**: `POST /notifications/config`
-
-  * Định nghĩa template, loại thông báo, kênh gửi (email).
-  * VD: Chọn nội dung email, subject, vv.
-* **API**: `GET /notifications/configs`
-
-  * Xem các config hiện có.
-
-**Công nghệ:**
-
-* FastAPI
-* MongoDB + umongo
-
-#### **2. Gửi thông báo**
-
-* **API**: `POST /notifications/send`
-
-  * Truyền vào: customer\_id hoặc “all”, notification\_config\_id, data động (cho template).
-  * Gọi task gửi nền bằng TaskIQ (có thể batch khi gửi nhiều).
-
-**Luồng xử lý:**
-
-* TaskIQ lấy thông tin khách hàng, render template, gửi email.
-* Cập nhật trạng thái gửi thành công/thất bại.
-* Nếu gửi cho nhiều user: chunk thành các batch nhỏ.
-
-**Công nghệ:**
-
-* FastAPI (API)
-* TaskIQ (task gửi email, retry nếu lỗi)
-* Email (SMTP, dùng thư viện như aiosmtplib hoặc fastapi-mail)
-* MongoDB (lưu log gửi/noti)
-
----
-
-### **E. Chatbot Message API – Trả lời user bằng AI**
-
-* **API**: `POST /messages/send`
-
-  * Nhận vào: customer\_id, message.
-  * Lưu message user vào memory (ngắn và dài).
-  * Gọi Langchain để generate response.
-  * Lưu response vào memory và trả về API.
-
-#### **Memory ngắn/dài:**
-
-* **Short-term (ngắn):** Redis (tồn tại 10-30 phút, các message gần nhất)
-* **Long-term (dài):** MongoDB (toàn bộ lịch sử hội thoại)
-* Khi cần sinh response, sẽ lấy cả memory ngắn & dài truyền cho Langchain.
-
-**Công nghệ:**
-
-* FastAPI
-* Redis (short-term message buffer)
-* MongoDB + umongo (long-term chat history)
-* Langchain (AI chatbot pipeline, tích hợp Google Gemini API)
-* Google Gemini Pro (AI model chính)
-* TaskIQ (nếu muốn trả lời async hoặc có delay xử lý lớn)
-
----
-
-### **F. API query lịch sử hội thoại**
-
-* **API**: `GET /messages/history?customer_id=...`
-
-**Công nghệ:**
-
-* FastAPI
-* MongoDB
-
----
-
-### **G. Task Management & Monitoring APIs**
-
-#### **1. Quản lý Tasks**
-
-* **API**: `GET /tasks` 
-  * List tất cả tasks với filter theo status, type, user_id
-  * Phân trang và sort theo thời gian
-* **API**: `GET /tasks/{job_id}`
-  * Chi tiết task cụ thể (progress, logs, error messages)
-* **API**: `POST /tasks/{job_id}/cancel`
-  * Hủy task đang pending hoặc running
-* **API**: `GET /tasks/stats`
-  * Dashboard stats: số task pending/running/completed/failed
-
-#### **2. Task Types được hỗ trợ:**
-
-* `csv_import` - Import khách hàng từ CSV
-* `email_batch_send` - Gửi email hàng loạt
-* `ai_chat_process` - Xử lý AI response phức tạp (nếu cần async)
-
-**Công nghệ:**
-
-* FastAPI
-* TaskIQ (task execution)
-* Redis (task status cache + results)
-* MongoDB (task logs + history)
-
----
-
-### **H. AI Prompt Management**
-
-#### **1. Dynamic Prompts**
-
-* **API**: `GET /prompts/templates`
-  * List các template prompt có sẵn
-* **API**: `POST /prompts/templates`
-  * Tạo/cập nhật prompt template
-* **API**: `GET /prompts/render`
-  * Test render prompt với data mẫu
-
-#### **2. Prompt Features:**
-
-* **System prompts**: Định nghĩa personality của bot
-* **Context templates**: Template để inject customer info, history
-* **Dynamic variables**: `{customer_name}`, `{company}`, `{recent_history}`
-* **Multilingual support**: Prompt theo ngôn ngữ khách hàng
-
-**Công nghệ:**
-
-* Jinja2 (template rendering)
-* Google Gemini Pro (AI model)
-* Langchain (prompt management)
-
----
-
-## **3. ĐỀ XUẤT CẤU TRÚC PROJECT**
-
-```
-/app
-├── api/
-│   ├── auth.py
-│   ├── customer.py
-│   ├── notification.py
-│   ├── message.py
-│   └── tasks.py (Task management APIs)
-├── tasks/
-│   ├── import_customers.py
-│   ├── send_email.py
-│   └── ai_chat_processor.py (Async AI processing)
-├── models/
-│   ├── user.py
-│   ├── customer.py
-│   ├── notification.py
-│   ├── chat.py
-│   └── task.py (Job status tracking)
-├── services/
-│   ├── email_sender.py
-│   ├── ai_chatbot.py
-│   ├── memory_manager.py
-│   ├── auth.py
-│   └── task_manager.py
-├── prompts/
-│   ├── system_prompt.txt
-│   ├── customer_service.txt
-│   └── templates/ (Dynamic prompt templates)
-├── utils/
-│   ├── csv_cleaner.py
-│   └── validators.py
-├── config/
-│   ├── settings.py
-│   └── database.py
-├── main.py (FastAPI entry)
-├── worker.py (TaskIQ worker)
-└── requirements.txt
+# 🤖 Notification Bot - AI Chatbot API Backend
+
+**Hệ thống chatbot thông minh với AI, quản lý khách hàng và notification system hoàn chỉnh**
+
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
+[![Google Gemini](https://img.shields.io/badge/Google%20Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+
+## 📋 Tổng quan
+
+Notification Bot là một hệ thống chatbot API backend hoàn chỉnh, có thể import và thêm khách hàng, tạo sự kiện thông báo gửi đến user, sau đó nếu user trả lời qua kênh chat, AI sẽ trả lời user theo context và memory long-short term
+
+### ✨ Tính năng chính
+
+- 👥 **Quản lý khách hàng** - CRUD operations + CSV import tự động
+- 📧 **Hệ thống thông báo** - Email notifications với template system
+- ⚡ **Background Tasks** - TaskIQ cho xử lý bất đồng bộ
+- 🔐 **JWT Authentication** - Bảo mật API endpoints
+- 📊 **Task Monitoring** - Dashboard theo dõi tasks real-time
+- 🌐 **RESTful API** - Swagger/OpenAPI documentation
+- 🤖 **AI Chatbot thông minh** - Sử dụng Google Gemini với Langchain
+- 🧠 **Memory Management** - Redis (short-term) + MongoDB (long-term)
+
+
+## 🏗️ Kiến trúc hệ thống
+
+```mermaid
+graph TB
+    A[FastAPI Server] --> B[JWT Auth]
+    A --> C[Customer API]
+    A --> D[Message API]
+    A --> E[Notification API]
+    A --> F[Task API]
+    
+    C --> G[MongoDB]
+    D --> H[Google Gemini AI]
+    D --> I[Redis Cache]
+    D --> G
+    
+    E --> J[TaskIQ Worker]
+    F --> J
+    J --> K[Email Service]
+    J --> L[CSV Processing]
+    
+    H --> M[Langchain]
+    I --> N[Short-term Memory]
+    G --> O[Long-term Memory]
 ```
 
----
+## 🛠️ Tech Stack
 
-## **4. TÓM TẮT CÔNG NGHỆ TƯƠNG ỨNG**
+### Backend Framework
+- **FastAPI** - Modern, fast web framework cho Python
+- **Uvicorn** - ASGI server với performance cao
+- **Pydantic** - Data validation và settings management
 
-| Thành phần        | Công nghệ                     |
-| ----------------- | ----------------------------- |
-| API server        | FastAPI                       |
-| Auth              | JWT (PyJWT, fastapi.security) |
-| Database          | MongoDB + umongo              |
-| Task Queue        | TaskIQ + RabbitMQ/Redis       |
-| CSV processing    | pandas                        |
-| Email             | aiosmtplib, fastapi-mail      |
-| AI chatbot        | Langchain, Google Gemini      |
-| Prompt templates  | Jinja2                        |
-| Short-term memory | Redis                         |
-| Long-term memory  | MongoDB                       |
-| Task monitoring   | Redis + MongoDB               |
-| Async/Queue       | TaskIQ                        |
+### Database & Cache
+- **MongoDB** - NoSQL database với umongo ODM
+- **Redis** - In-memory cache và message broker
+- **Motor** - Async MongoDB driver
 
----
+### GenAI
+- **Google Gemini** - Large Language Model
+- **Langchain** - AI framework cho chat applications
+- **Google GenerativeAI** - Python SDK cho Gemini
 
-## **5. API ENDPOINTS**
+### Task Queue & Background Processing
+- **TaskIQ** - Modern task queue cho Python
+- **TaskIQ-Redis** - Redis broker cho TaskIQ
 
-| Phân hệ      | Endpoint                                | Ý nghĩa                      |
-| ------------ | --------------------------------------- | ---------------------------- |
-| Auth         | POST `/auth/login`                      | Đăng nhập, trả JWT           |
-| Customer     | POST `/customers/import`                | Import csv, đẩy task         |
-|              | GET `/customers/import/{job_id}/status` | Tra trạng thái import        |
-|              | GET `/customers`                        | List, filter, paging         |
-|              | GET `/customers/{id}`                   | Lấy info                     |
-|              | PUT `/customers/{id}`                   | Update                       |
-|              | DELETE `/customers/{id}`                | Xoá                          |
-| Notification | POST `/notifications/config`            | Tạo config noti              |
-|              | GET `/notifications/configs`            | List config                  |
-|              | POST `/notifications/send`              | Gửi noti (1 user / all)      |
-| Message      | POST `/messages/send`                   | User gửi message, AI trả lời |
-|              | GET `/messages/history`                 | Query hội thoại              |
-| Tasks        | GET `/tasks`                            | List tất cả tasks/jobs       |
-|              | GET `/tasks/{job_id}`                   | Chi tiết task cụ thể         |
-|              | POST `/tasks/{job_id}/cancel`           | Hủy task đang chạy           |
-|              | GET `/tasks/stats`                      | Thống kê task (pending/running/completed/failed) |
+### Authentication & Security
+- **Python-JOSE** - JWT token handling
+- **Passlib** - Password hashing với bcrypt
+- **CORS Middleware** - Cross-origin resource sharing
 
----
+### Data Processing & Email
+- **Pandas** - CSV processing và data manipulation
+- **aiosmtplib** - Async SMTP client
+- **FastAPI-Mail** - Email template system
+- **Jinja2** - Template engine
 
-## **6. VỀ KỸ THUẬT**
+## 📦 Cài đặt và Setup (Docker)
 
-* **Sử dụng TaskIQ** để giải phóng tải cho API server, xử lý các công việc nặng như import csv hoặc gửi nhiều email đồng loạt.
-* **pandas** giúp xử lý dữ liệu lớn, lọc trùng, chuẩn hoá khách hàng hiệu quả.
-* **umongo** chuẩn hoá schema khách hàng, log gửi, chat history.
-* **AI chatbot** quản lý ngữ cảnh hội thoại chuyên nghiệp nhờ hệ thống memory ngắn/dài (redis/mongodb), có thể dễ dàng mở rộng dùng nhiều loại AI khác nhau.
-* **Bảo mật** tốt với JWT, validate từng request.
-* **Dễ scale**: Task worker có thể mở rộng theo số lượng request lớn.
-* **Task Monitoring**: Full visibility vào task status, logs, và performance metrics.
-* **Dynamic Prompts**: Quản lý prompts linh hoạt, test và A/B test các prompt khác nhau.
-* **Google Gemini Integration**: Sử dụng model AI mạnh mẽ với cost-effective.
-* **Memory Architecture**: Hybrid memory (Redis + MongoDB) cho performance và persistence tối ưu.
-* **Xử lý realtime**: Có thể bổ sung WebSocket nếu cần gửi notification/chat live về client.
+Cách nhanh nhất và được khuyến khích để chạy dự án này là sử dụng Docker và Docker Compose. Toàn bộ hệ thống (API, Worker, Database, Cache) sẽ được khởi động chỉ với một vài lệnh đơn giản.
 
----
+### 1. Yêu cầu hệ thống
+- Docker
+- Docker Compose
+- `make` (tùy chọn, để sử dụng các lệnh tắt)
 
-## **7. LƯU Ý VÀ GỢI Ý PHÁT TRIỂN THÊM**
+### 2. Clone repository
+```bash
+git clone <repository-url>
+cd notification_bot
+```
 
-### **A. Production Ready Features:**
-* **Rate Limiting**: Implement rate limiting cho các API endpoints
-* **Caching Strategy**: Cache frequent queries (customer info, prompt templates)
-* **Health Checks**: `/health` endpoint cho load balancer
-* **Metrics & Logging**: Prometheus metrics, structured logging
-* **Error Handling**: Comprehensive error responses với error codes
+### 3. Cấu hình môi trường
+Cần tạo một file `.env` trong thư mục `notification/` để cấu hình các biến môi trường.
 
-### **B. Advanced Features:**
-* **Webhook Support**: Cho external integrations
-* **Batch Operations**: Bulk customer operations
-* **File Storage**: S3/MinIO cho CSV files và attachments  
-* **API Versioning**: `/v1/`, `/v2/` cho backward compatibility
-* **OpenAPI Documentation**: Auto-generated với examples
+```bash
+# Từ thư mục gốc của project (notification_bot)
+cp notification/env.example notification/.env
+```
 
-### **C. Cấu trúc API modules:**
-  * **Auth**: JWT, refresh tokens, user management
-  * **Customer**: CRUD, import, export, segmentation
-  * **Notification**: Templates, campaigns, delivery tracking
-  * **Message**: AI chat, history, context management  
-  * **Tasks**: Job monitoring, cancellation, retry logic
-  * **Prompts**: Template management, A/B testing
+Sau đó, mở file `notification/.env` và điền `GOOGLE_API_KEY` của . Các biến khác đã được cấu hình sẵn để hoạt động với Docker Compose.
 
-### **D. TaskIQ Advanced Usage:**
-* **Task Priorities**: High/Normal/Low priority queues
-* **Task Scheduling**: Cron-like scheduled tasks
-* **Task Chaining**: Pipeline of dependent tasks
-* **Error Recovery**: Automatic retry với exponential backoff
-* **Task Metrics**: Execution time, success rate tracking
+```env
+# notification/.env
 
----
+# Google Gemini API (BẮT BUỘC)
+GOOGLE_API_KEY=your-google-api-key-here
 
-Bạn thấy plan này đã “giải nghĩa” đủ kỹ ý tưởng chưa?
-Bạn cần **mock code khởi đầu**, hoặc vẽ sơ đồ kiến trúc, hay cần chi tiết hơn từng phần nào không?
-Tui có thể gợi ý kỹ hơn về xử lý AI memory hoặc cách build TaskIQ worker cho file import nếu bạn muốn!
+# Các biến khác có thể giữ nguyên khi chạy với Docker
+# ...
+```
+
+### 4. Khởi động hệ thống
+Sử dụng `make` để khởi động tất cả các service. Lệnh này sẽ tự động build image và chạy các container ở chế độ nền.
+
+```bash
+make up
+```
+
+Nếu không có `make`,  có thể dùng lệnh `docker-compose` trực tiếp:
+```bash
+docker-compose up -d --build
+```
+
+### 5. Kiểm tra trạng thái
+Sau khi khởi động, có thể kiểm tra trạng thái của các container:
+```bash
+docker-compose ps
+```
+
+Các service `mongo`, `redis`, `app`, và `worker` sẽ chạy.
+
+### 6. Truy cập ứng dụng
+- **API Documentation (Swagger UI)**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+
+### Các lệnh `make` hữu ích khác
+- `make logs`: Xem log từ tất cả các service.
+- `make logs-app`: Chỉ xem log của API server.
+- `make logs-worker`: Chỉ xem log của TaskIQ worker.
+- `make down`: Dừng tất cả các service.
+- `make clean`: Dừng và xóa toàn bộ container, network và volume.
+- `make shell`: Truy cập vào shell của container `app` để gỡ lỗi hoặc chạy lệnh.
+
+## 🚀 API Documentation
+
+### Authentication Endpoints
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/auth/login` | Đăng nhập user | ❌ |
+| GET | `/auth/me` | Thông tin user hiện tại | ✅ |
+| POST | `/auth/register` | Đăng ký user mới | ❌ |
+
+### Customer Management
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/customers` | Danh sách khách hàng (có pagination) | ✅ |
+| POST | `/customers` | Tạo khách hàng mới | ✅ |
+| GET | `/customers/{id}` | Chi tiết khách hàng | ✅ |
+| PUT | `/customers/{id}` | Cập nhật khách hàng | ✅ |
+| DELETE | `/customers/{id}` | Xóa khách hàng | ✅ |
+| POST | `/customers/import` | Import CSV với TaskIQ | ✅ |
+
+### AI Chatbot
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/messages/send` | Gửi tin nhắn cho AI | ✅ |
+| GET | `/messages/history` | Lịch sử chat theo session | ✅ |
+| DELETE | `/messages/history/{session_id}` | Xóa lịch sử chat | ✅ |
+| GET | `/messages/memory/stats` | Thống kê memory usage | ✅ |
+
+### Notification System
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/notifications/config` | Tạo notification template | ✅ |
+| GET | `/notifications/config` | Danh sách templates | ✅ |
+| PUT | `/notifications/config/{id}` | Cập nhật template | ✅ |
+| DELETE | `/notifications/config/{id}` | Xóa template | ✅ |
+| POST | `/notifications/send` | Gửi notification với TaskIQ | ✅ |
+| GET | `/notifications/history` | Lịch sử notifications | ✅ |
+| GET | `/notifications/stats` | Thống kê notifications | ✅ |
+
+### Task Management
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/tasks` | Danh sách tasks (có filter) | ✅ |
+| GET | `/tasks/{job_id}` | Chi tiết task | ✅ |
+| POST | `/tasks/{job_id}/cancel` | Hủy task đang chạy | ✅ |
+| DELETE | `/tasks/{job_id}` | Xóa task record | ✅ |
+| GET | `/tasks/stats/overview` | Thống kê tổng quan | ✅ |
+| GET | `/tasks/stats/recent` | Thống kê tasks gần đây | ✅ |
+
+## 🤖 AI Chatbot System
+
+### Tính năng AI
+- **Context Awareness**: Bot nhớ thông tin khách hàng và lịch sử hội thoại
+- **Vietnamese Support**: Được tối ưu cho tiếng Việt
+- **Professional Tone**: Giọng điệu chuyên nghiệp
+- **Notification Integration**: Tự động reference notifications trong chat
+- **Memory Management**: Kết hợp short-term (Redis) và long-term (MongoDB)
+
+### System Prompt
+Bot được cấu hình với personality chuyên nghiệp trong `prompts/system_prompt.py`:
+- Trợ lý khách hàng thân thiện
+- Trả lời bằng tiếng Việt
+- Hỗ trợ đặt hàng, thanh toán, chính sách
+- Tích hợp thông báo vào cuộc hội thoại
+
+### Memory Architecture
+```python
+# Short-term Memory (Redis) - 30 phút
+- Conversation context
+- Recent customer interactions
+- Temporary session data
+
+# Long-term Memory (MongoDB) - Vĩnh viễn
+- Customer profiles
+- Chat history
+- Notification records
+- Learning patterns
+```
+
+## 📧 Notification System
+
+### Template System
+- **Dynamic Variables**: `{customer_name}`, `{customer_email}`, `{company}`
+- **Jinja2 Templates**: Advanced templating với logic
+- **Multi-channel**: Email, in-app notifications
+- **Batch Processing**: Gửi hàng loạt với TaskIQ
+
+### Notification Flow
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant API
+    participant TaskIQ
+    participant AI Bot
+    participant Customer
+    
+    Admin->>API: POST /notifications/send
+    API->>TaskIQ: Queue notification task
+    TaskIQ->>TaskIQ: Process template
+    TaskIQ->>Customer: Send email
+    TaskIQ->>AI Bot: Inject into chat context
+    Customer->>AI Bot: Ask about notification
+    AI Bot->>Customer: Reference notification content
+```
+
+## ⚡ TaskIQ Background Processing
+
+### Task Types
+1. **CSV Import Processing** (`import_customers.py`)
+   - Parse và validate CSV files
+   - Batch insert customers
+   - Progress tracking
+   - Error reporting
+
+2. **Email Notification Sending** (`send_notification.py`)
+   - Template processing
+   - Batch email sending
+   - Delivery tracking
+   - Retry mechanism
+
+### Task Monitoring
+- **Real-time Progress**: WebSocket updates
+- **Status Tracking**: pending → running → completed/failed
+- **Error Handling**: Detailed error logs
+- **Performance Metrics**: Execution time, success rate
+- **Task Cancellation**: Stop running tasks
+
+## 📁 Cấu trúc Project
+
+```
+notification/
+├── 📁 api/                     # API route handlers
+│   ├── 🔐 auth.py             # JWT authentication
+│   ├── 👥 customer.py         # Customer CRUD + CSV import
+│   ├── 💬 message.py          # AI chatbot messaging
+│   ├── 📧 notification.py     # Notification management
+│   └── ⚡ tasks.py            # Task monitoring
+├── 📁 config/                  # Configuration modules
+│   ├── ⚙️ settings.py         # Pydantic settings
+│   └── 🗄️ database.py         # DB connection setup
+├── 📁 models/                  # Database models (umongo)
+│   ├── 👤 user.py             # User authentication
+│   ├── 👥 customer.py         # Customer data model
+│   ├── 💬 chat.py             # Chat sessions & messages
+│   ├── 📧 notification.py     # Notification templates
+│   └── ⚡ task.py             # TaskIQ job tracking
+├── 📁 services/                # Business logic layer
+│   ├── 🔐 auth.py             # JWT + password hashing
+│   ├── 🤖 ai_chatbot.py       # Google Gemini integration
+│   └── 🧠 memory_manager.py   # Redis + MongoDB memory
+├── 📁 tasks/                   # TaskIQ background tasks
+│   ├── 📊 import_customers.py # CSV processing
+│   └── 📧 send_notification.py# Email sending
+├── 📁 utils/                   # Utility functions
+│   └── ✅ validators.py       # Data validation helpers
+├── 📁 prompts/                 # AI prompt templates
+│   └── 🤖 system_prompt.py    # FTEL chatbot personality
+├── 📁 uploads/                 # File upload directory
+├── 🚀 main.py                 # FastAPI application
+├── ⚡ worker.py               # TaskIQ worker process
+├── 📋 requirements.txt        # Python dependencies
+├── 🔧 env.example             # Environment template
+└── 📚 README.md               # Documentation
+```
+
+## 🔧 Development
+
+### Local Development
+```bash
+# Hot reload development server
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Run TaskIQ worker với debug
+python worker.py
+
+# Run tests
+pytest tests/ -v
+
+# Code formatting
+black .
+isort .
+```
+
+### Environment Variables
+```env
+# App Configuration
+DEBUG=true
+APP_NAME="Chatbot API Backend"
+APP_VERSION="1.0.0"
+HOST=0.0.0.0
+PORT=8000
+
+# Security
+SECRET_KEY=your-secret-key-change-in-production
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Database
+MONGODB_URL=mongodb://admin:password123@localhost:27017
+MONGODB_DATABASE=chatbot_db
+
+# Redis & TaskIQ
+REDIS_URL=redis://localhost:6379
+REDIS_DB=0
+TASKIQ_BROKER_URL=redis://localhost:6379/1
+TASKIQ_RESULT_BACKEND_URL=redis://localhost:6379/2
+
+# AI Configuration
+GOOGLE_API_KEY=your-google-api-key
+GEMINI_MODEL=gemini-1.5-flash
+
+# File Upload
+UPLOAD_DIR=./uploads
+MAX_FILE_SIZE=10485760  # 10MB
+
+# Memory Settings
+SHORT_TERM_MEMORY_TTL=1800  # 30 minutes
+MAX_CONVERSATION_HISTORY=50
+```
+
+## 📊 Monitoring & Analytics
+
+### Health Checks
+```bash
+# Basic health check
+curl http://localhost:8000/health
+
+# Database connectivity
+curl http://localhost:8000/health/db
+
+# Redis connectivity
+curl http://localhost:8000/health/redis
+```
+
+### API Documentation
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+- **OpenAPI JSON**: http://localhost:8000/openapi.json
+
+### Performance Monitoring
+- Task execution metrics
+- Memory usage statistics
+- API response times
+- Error rate tracking
+- Database query performance
+
+## 🔒 Security Features
+
+- **JWT Authentication**: Secure token-based auth
+- **Password Hashing**: bcrypt với salt
+- **CORS Protection**: Configurable origins
+- **Input Validation**: Pydantic models
+- **File Upload Security**: Type và size validation
+- **Rate Limiting**: API endpoint protection
+- **SQL Injection Prevention**: NoSQL với umongo
+
+## 🐳 Docker Deployment (Coming Soon)
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+      - redis
+    environment:
+      - MONGODB_URL=mongodb://admin:password123@mongo:27017
+      - REDIS_URL=redis://redis:6379
+      # ... other env vars
+
+  worker:
+    build: .
+    command: python worker.py
+    depends_on:
+      - redis
+    environment:
+      - TASKIQ_BROKER_URL=redis://redis:6379/1
+      # ... other env vars
+
+  mongo:
+    image: mongo:latest
+    # ... config
+
+  redis:
+    image: redis:7-alpine
+    # ... config
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow these steps:
+1. Fork the repository.
+2. Create a new feature branch (`git checkout -b feature/your-feature`).
+3. Commit your changes (`git commit -m 'Add some feature'`).
+4. Push to the branch (`git push origin feature/your-feature`).
+5. Open a Pull Request.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
